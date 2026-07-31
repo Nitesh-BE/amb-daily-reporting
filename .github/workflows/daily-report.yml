@@ -1,0 +1,38 @@
+name: Ambassador Daily Report
+
+on:
+  schedule:
+    # 03:45 UTC = 09:15 IST, Mon–Fri. Early enough to absorb GitHub's cron
+    # variance (usually a few min) + ~10 min generation, and still land by 10:00.
+    - cron: "45 3 * * 1-5"
+  workflow_dispatch: {}          # manual "Run workflow" button = on-demand run
+
+concurrency:
+  group: daily-report            # never run two at once
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate report and post to RingCentral
+        env:
+          CORALOGIX_API_KEY:  ${{ secrets.CORALOGIX_API_KEY }}
+          CORALOGIX_BASE_URL: ${{ secrets.CORALOGIX_BASE_URL }}
+          RC_SERVER_URL:      ${{ secrets.RC_SERVER_URL }}
+          RC_CLIENT_ID:       ${{ secrets.RC_CLIENT_ID }}
+          RC_CLIENT_SECRET:   ${{ secrets.RC_CLIENT_SECRET }}
+          RC_JWT:             ${{ secrets.RC_JWT }}
+          RC_GROUP_ID:        ${{ secrets.RC_GROUP_ID }}
+          RC_BOT_TOKEN:       ${{ secrets.RC_BOT_TOKEN }}
+        run: python runner.py "scheduled (GitHub Actions)"

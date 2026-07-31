@@ -1,0 +1,22 @@
+# secrets — NEVER commit these (they live in GitHub Actions secrets instead)
+config.json
+key_coralogix.json
+# HTML files embed the Coralogix key and/or contain report data with account info
+*.html
+
+# local runtime
+.venv/
+logs/
+reports/
+launcher.log
+*.pyc
+__pycache__/
+
+# abandoned macOS applet experiment
+Daily Error Report.app/
+report_runner_gui.py
+launcher.c
+
+# misc
+.DS_Store
+.claude/
