@@ -5,7 +5,12 @@ on:
     # 03:45 UTC = 09:15 IST, Mon–Fri. Early enough to absorb GitHub's cron
     # variance (usually a few min) + ~10 min generation, and still land by 10:00.
     - cron: "45 3 * * 1-5"
-  workflow_dispatch: {}          # manual "Run workflow" button = on-demand run
+  workflow_dispatch:             # manual "Run workflow" button = on-demand run
+    inputs:
+      lookback_hours:
+        description: "Report window in hours (default 24)"
+        required: false
+        default: "24"
 
 concurrency:
   group: daily-report            # never run two at once
@@ -35,4 +40,5 @@ jobs:
           RC_JWT:             ${{ secrets.RC_JWT }}
           RC_GROUP_ID:        ${{ secrets.RC_GROUP_ID }}
           RC_BOT_TOKEN:       ${{ secrets.RC_BOT_TOKEN }}
+          LOOKBACK_HOURS:     ${{ github.event.inputs.lookback_hours }}
         run: python runner.py "scheduled (GitHub Actions)"

@@ -16,6 +16,15 @@ START     = sys.argv[4] if len(sys.argv) > 4 else _start.strftime("%Y-%m-%dT%H:%
 TODAY     = sys.argv[5] if len(sys.argv) > 5 else _now.strftime("%Y-%m-%d")
 YESTERDAY = (datetime.strptime(TODAY, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
 
+# Window label — dynamic, so custom /gr Nh|Nd ranges are labelled correctly.
+try:
+    _wh = (datetime.strptime(END, "%Y-%m-%dT%H:%M:%SZ")
+           - datetime.strptime(START, "%Y-%m-%dT%H:%M:%SZ")).total_seconds() / 3600
+    WINDOW_LABEL = (f"Last {int(round(_wh))} Hours" if _wh < 47.9
+                    else f"Last {int(round(_wh / 24))} Days")
+except Exception:
+    WINDOW_LABEL = "Last 24 Hours"
+
 print(f"Period : {START}  →  {END}", flush=True)
 
 CONFIGURED_TIMEOUTS = {
@@ -790,7 +799,7 @@ tr:hover td {background:#f8f9fa}
 <div class="container">
 
 <h1>Ambassador Error Analysis &mdash; Daily Report</h1>
-<div class="subtitle">Period: {YESTERDAY} &mdash; {TODAY} (Last 24 Hours) &nbsp;|&nbsp; Service: ambassador-service-java-backend &nbsp;|&nbsp; Generated: {generated_ts}</div>
+<div class="subtitle">Period: {START} &mdash; {END} ({WINDOW_LABEL}) &nbsp;|&nbsp; Service: ambassador-service-java-backend &nbsp;|&nbsp; Generated: {generated_ts}</div>
 
 {stat_grid_html}
 

@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 
 from rc_client import RingCentral, load_config
 
@@ -49,12 +50,18 @@ def _short(label):
     return label.replace("_", " ", 1).replace("_", " ")
 
 
-def run_report(trigger="scheduled"):
+def run_report(trigger="scheduled", lookback_hours=24):
     rc = RingCentral(CFG["ringcentral"])
     key = coralogix_key()
     base = CFG.get("coralogix", {}).get("base_url", "https://api.cx498.coralogix.com")
 
-    header = f"🔄 **Ambassador Error Report** — generating… _(trigger: {trigger})_"
+    now = datetime.now(timezone.utc)
+    end_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_iso = (now - timedelta(hours=lookback_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    today_iso = now.strftime("%Y-%m-%d")
+    win = "" if abs(lookback_hours - 24) < 0.01 else f" · last {lookback_hours:g}h"
+
+    header = f"🔄 **Ambassador Error Report** — generating…{win} _(trigger: {trigger})_"
     post_id = rc.post(header + "\n\n_submitting queries…_")
 
     order, phase = [], {}
@@ -69,7 +76,8 @@ def run_report(trigger="scheduled"):
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
-    proc = subprocess.Popen([PY_EXE, SCRIPT, key, base], cwd=BASE_DIR, env=env,
+    proc = subprocess.Popen([PY_EXE, SCRIPT, key, base, end_iso, start_iso, today_iso],
+                            cwd=BASE_DIR, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1)
 
@@ -180,5 +188,9 @@ def build_preview(summary, today, generated):
 
 if __name__ == "__main__":
     trig = sys.argv[1] if len(sys.argv) > 1 else "manual"
-    ok = run_report(trig)
+    try:
+        lb = float(os.environ.get("LOOKBACK_HOURS") or 24)
+    except ValueError:
+        lb = 24.0
+    ok = run_report(trig, lookback_hours=lb)
     sys.exit(0 if ok else 1)
