@@ -2,6 +2,10 @@ name = "amb-daily-reporting"
 main = "worker.js"
 compatibility_date = "2026-08-01"
 
+[vars]
+WATCHED_TEAMS  = "164470267910"   # comma-separated team ids polled for /gr (report posts back to origin team)
+DAILY_GROUP_ID = "164470267910"   # team the 10:00 IST daily posts to
+
 [triggers]
 crons = ["* * * * *", "30 4 * * 1-5"]   # every-minute /gr poll  +  10:00 IST daily (04:30 UTC, Mon-Fri)
 

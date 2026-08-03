@@ -12,6 +12,10 @@ on:
         description: "Report window in hours (default 24)"
         required: false
         default: "24"
+      group_id:
+        description: "Target RingCentral team id (blank = default BOT_RC_GROUP_ID)"
+        required: false
+        default: ""
 
 concurrency:
   group: daily-report-bot
@@ -38,6 +42,6 @@ jobs:
           RC_SERVER_URL:      ${{ secrets.RC_SERVER_URL }}
           RC_CLIENT_ID:       ${{ secrets.BOT_RC_CLIENT_ID }}
           RC_BOT_TOKEN:       ${{ secrets.BOT_RC_TOKEN }}
-          RC_GROUP_ID:        ${{ secrets.BOT_RC_GROUP_ID }}
+          RC_GROUP_ID:        ${{ github.event.inputs.group_id != '' && github.event.inputs.group_id || secrets.BOT_RC_GROUP_ID }}
           LOOKBACK_HOURS:     ${{ github.event.inputs.lookback_hours }}
         run: python runner.py "bot-test (GitHub Actions)"
