@@ -106,6 +106,8 @@ async function pollTeam(env, team) {
       await scheduleReport(env, cmd, ts, team);
       await postToTeam(env, team, `⏳ Scheduled — report in ~${fmtDelay(cmd.delayMin)} (window: last ${cmd.lookbackH}h).`);
     } else {
+      const win = cmd.lookbackH === 24 ? "" : ` (last ${cmd.lookbackH}h)`;
+      await postToTeam(env, team, `👀 Got it — generating your report${win} now, it'll be here in a few minutes…`);
       await dispatch(env, cmd.lookbackH, "/gr (Cloudflare)", team);
     }
   }
