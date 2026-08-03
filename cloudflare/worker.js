@@ -89,13 +89,13 @@ async function tick(env) {
     if (ct <= lastTs) continue;
     maxTs = Math.max(maxTs, ct);
     const cmd = parseCommand(p.text);
-    if (cmd) actions.push(cmd);
+    if (cmd) actions.push({ cmd, ts: ct });
   }
   if (maxTs > lastTs) await env.LASTSEEN.put("lastTs", String(maxTs));
 
-  for (const cmd of actions) {
+  for (const { cmd, ts } of actions) {
     if (cmd.delayMin > 0) {
-      await scheduleReport(env, cmd);
+      await scheduleReport(env, cmd, ts);
       await postToTeam(env, `⏳ Scheduled — report in ~${fmtDelay(cmd.delayMin)} (window: last ${cmd.lookbackH}h).`);
     } else {
       await dispatch(env, cmd.lookbackH, "/gr (Cloudflare)");
@@ -104,10 +104,10 @@ async function tick(env) {
 }
 
 // ── scheduled-report store (Cloudflare KV) ───────────────────────────────────
-async function scheduleReport(env, cmd) {
+async function scheduleReport(env, cmd, baseTs) {
   let list = [];
   try { list = JSON.parse((await env.LASTSEEN.get("scheduled")) || "[]") || []; } catch {}
-  list.push({ fireAt: Date.now() + cmd.delayMin * 60000, lookbackH: cmd.lookbackH });
+  list.push({ fireAt: (baseTs || Date.now()) + cmd.delayMin * 60000, lookbackH: cmd.lookbackH });
   await env.LASTSEEN.put("scheduled", JSON.stringify(list));
 }
 
