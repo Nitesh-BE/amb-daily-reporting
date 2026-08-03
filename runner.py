@@ -50,13 +50,23 @@ def _short(label):
     return label.replace("_", " ", 1).replace("_", " ")
 
 
-def _already_delivered(rc, ist_date):
-    """True if a scheduled report for this IST date was already posted."""
+def _scheduled_done_today(rc, ist_date):
+    """True if a SCHEDULED run already fired today (IST). Lets the several
+    morning cron attempts de-dup to one, without a manual/ /gr run suppressing
+    the daily (those carry a different trigger label in the 'generating' post)."""
+    ist = timezone(timedelta(hours=5, minutes=30))
     try:
-        for p in rc.recent_posts(count=15):
+        for p in rc.recent_posts(count=20):
             t = p.get("text") or ""
-            if t.startswith("✅ **Ambassador Error Report") and ist_date in t:
-                return True
+            if "Ambassador Error Report" not in t or "trigger: scheduled" not in t:
+                continue
+            ct = p.get("creationTime", "")
+            try:
+                dt = datetime.strptime(ct[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+                if dt.astimezone(ist).strftime("%Y-%m-%d") == ist_date:
+                    return True
+            except Exception:
+                continue
     except Exception:
         pass
     return False
@@ -65,11 +75,11 @@ def _already_delivered(rc, ist_date):
 def run_report(trigger="scheduled", lookback_hours=24):
     rc = RingCentral(CFG["ringcentral"])
 
-    # De-dup: several backup cron times fire each morning, but only the FIRST
-    # scheduled run of the day should post. Manual / /gr runs are never skipped.
+    # De-dup: several backup cron times fire each morning; only the FIRST
+    # scheduled run of the day posts. Manual / /gr runs are never skipped.
     ist_today = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
-    if "scheduled" in trigger.lower() and _already_delivered(rc, ist_today):
-        print(f"[skip] scheduled report for {ist_today} already delivered", flush=True)
+    if "scheduled" in trigger.lower() and _scheduled_done_today(rc, ist_today):
+        print(f"[skip] scheduled report already ran today ({ist_today})", flush=True)
         return True
 
     key = coralogix_key()
