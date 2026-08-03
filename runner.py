@@ -96,13 +96,14 @@ def run_report(trigger="scheduled", lookback_hours=24):
 
     order, phase = [], {}
     done = 0
+    total_q = TOTAL_QUERIES        # updated from the script's "TOTAL_QUERIES n" line
     all_lines = []
     last_edit = 0.0
 
     def render(footer="_running…_"):
         rows = "\n".join(f"{phase[l]}  {_short(l)}" for l in order)
-        bar_done = "▰" * done + "▱" * (TOTAL_QUERIES - done)
-        return f"{header}\n\n{rows}\n\n{bar_done}  {done}/{TOTAL_QUERIES}\n{footer}"
+        bar_done = "▰" * done + "▱" * max(total_q - done, 0)
+        return f"{header}\n\n{rows}\n\n{bar_done}  {done}/{total_q}\n{footer}"
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
@@ -114,6 +115,12 @@ def run_report(trigger="scheduled", lookback_hours=24):
     for raw in proc.stdout:
         line = raw.rstrip("\n")
         all_lines.append(line)
+        if line.startswith("TOTAL_QUERIES "):
+            try:
+                total_q = int(line.split()[1])
+            except Exception:
+                pass
+            continue
         m = LINE_RE.match(line)
         if m:
             lab, msg = m.group("label"), m.group("msg").lower()

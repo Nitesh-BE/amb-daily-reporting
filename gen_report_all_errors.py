@@ -358,6 +358,62 @@ QUERIES = [
 ]
 
 
+# ── known issues (segregation) ────────────────────────────────────────────────
+# Understood, non-actionable errors to pull out of the main breakdown into their
+# own report section. To track a NEW one, just append a dict here — nothing else
+# changes. `exclude_from_main` also removes it from the Q1–Q5 error tables.
+KNOWN_ISSUES = [
+    {
+        "name": "Invalid Session Token",
+        "field": "system_api",                 # log field to match on (default system_api)
+        "match": "getUserLoginMessage",        # substring, matched via :string.contains()
+        "note": "getUserLoginMessageV2 401s = client sent an expired/invalid session token (code 1004) — expected client behaviour, not a service defect.",
+        "exclude_from_main": True,
+    },
+]
+
+
+def _ki_label(ki):
+    return "KI_" + ki["name"].replace(" ", "_")
+
+
+def _excl_clause():
+    """Filter(s) that drop known issues but KEEP logs where the field is null.
+    Coralogix has no !~ operator, so we negate a .contains() with !(...)."""
+    parts = []
+    for ki in KNOWN_ISSUES:
+        if ki.get("exclude_from_main"):
+            f = ki.get("field", "system_api")
+            m = ki["match"].replace("'", "\\'")
+            parts.append(f"($d.{f} == null || !($d.{f}:string.contains('{m}')))")
+    return "".join(f"| filter {p} " for p in parts)
+
+
+_EXCL = _excl_clause()
+_MAIN_KEYS = {"Q1_system_status_breakdown", "Q2_total_errors", "Q3_by_system",
+              "Q4_by_status_code", "Q5_api_breakdown"}
+if _EXCL:
+    QUERIES = [
+        (label, q.replace("| filter $d.system_status_code >= 400 ",
+                          "| filter $d.system_status_code >= 400 " + _EXCL, 1))
+        if label in _MAIN_KEYS else (label, q)
+        for label, q in QUERIES
+    ]
+
+# One count per known issue, scoped to downstream errors, so the section total
+# equals exactly what was removed from the main tables.
+for _ki in KNOWN_ISSUES:
+    _f = _ki.get("field", "system_api")
+    _m = _ki["match"].replace("'", "\\'")
+    QUERIES.append((
+        _ki_label(_ki),
+        "source logs | filter $l.subsystemname == 'ambassador-service-java-backend' "
+        "| filter $d.system != null | filter $d.system_status_code >= 400 "
+        f"| filter $d.{_f}:string.contains('{_m}') | count"))
+
+print(f"TOTAL_QUERIES {len(QUERIES)}", flush=True)
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -375,6 +431,21 @@ def main():
             total_errors = int(v)
         except Exception:
             pass
+
+    # Known issues (segregated) — counts that were excluded from the tables above
+    known_issues = []
+    known_total = 0
+    for ki in KNOWN_ISSUES:
+        cnt = 0
+        for r in raw.get(_ki_label(ki), []):
+            v = r.get("_count") or r.get("count") or r.get("cnt") or 0
+            try:
+                cnt = int(v)
+            except Exception:
+                pass
+        known_issues.append(dict(ki, count=cnt))
+        known_total += cnt
+    grand_total = total_errors + known_total
 
     # Status code distribution
     status_dist = {}
@@ -540,6 +611,11 @@ def main():
 
     # ── key findings ─────────────────────────────────────────────────────────
     findings = []
+    if known_total:
+        _kn = ", ".join(escape_html(k["name"]) for k in known_issues if k["count"])
+        findings.append(
+            f"<strong>{known_total:,}</strong> errors were segregated as <strong>known issues</strong> "
+            f"({_kn}) and excluded — the totals below reflect actionable errors only.")
     if total_errors:
         findings.append(
             f"<strong>{total_errors:,}</strong> downstream errors recorded in the last 24 hours "
@@ -796,6 +872,30 @@ tr:hover td {background:#f8f9fa}
     findings_html = "".join(f"<li style='margin-bottom:6px'>{f}</li>" for f in findings)
     recs_html     = "".join(f"<li style='margin-bottom:6px'>{r}</li>" for r in recommendations)
 
+    # Known Issues (segregated) section
+    known_section = ""
+    if known_issues and known_total:
+        ki_rows = ""
+        for ki in known_issues:
+            pct = round(ki["count"] / grand_total * 100, 1) if grand_total else 0
+            ki_rows += ("<tr>"
+                        f"<td><strong>{escape_html(ki['name'])}</strong></td>"
+                        f"<td>{ki['count']:,}</td>"
+                        f"<td>{pct}%</td>"
+                        f"<td class='mono'>{escape_html(ki['match'])}</td>"
+                        f"<td>{escape_html(ki['note'])}</td>"
+                        "</tr>")
+        _kpct = round(known_total / grand_total * 100) if grand_total else 0
+        known_section = f"""
+<div class="card" style="border-left:4px solid #f39c12">
+<h2>Known Issues (Segregated)</h2>
+<p style="color:#666;font-size:12px;margin-bottom:10px">Understood, non-actionable errors. <strong>{known_total:,}</strong> such errors ({_kpct}% of all {grand_total:,}) were <strong>excluded from the totals and tables below</strong> so the report highlights genuine issues.</p>
+<div class="scroll-table"><table>
+<thead><tr><th>Known Issue</th><th>Count</th><th>% of All Errors</th><th>Signature (endpoint contains)</th><th>Why it's known</th></tr></thead>
+<tbody>{ki_rows}</tbody>
+</table></div>
+</div>"""
+
     def empty_row(cols, msg="No data"):
         return f'<tr><td colspan="{cols}" style="text-align:center;color:#999">{msg}</td></tr>'
 
@@ -819,6 +919,7 @@ tr:hover td {background:#f8f9fa}
 <h2>Key Findings</h2>
 <ul style="padding-left:18px;line-height:1.8">{findings_html}</ul>
 </div>
+{known_section}
 
 <!-- 1. Status Code Distribution -->
 <div class="card">
