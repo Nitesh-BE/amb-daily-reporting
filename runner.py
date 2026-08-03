@@ -131,9 +131,12 @@ def run_report(trigger="scheduled", lookback_hours=24):
     report_path = summary["report_path"]
     if not os.path.isabs(report_path):
         report_path = os.path.join(BASE_DIR, report_path)
-    today = summary.get("today", time.strftime("%Y-%m-%d"))
-    generated = time.strftime("%Y-%m-%d %H:%M IST (%a)")          # Mac local tz = IST
-    nice_name = time.strftime("Ambassador_Error_Report_%Y-%m-%d_%a_%H-%M_IST.html")
+    # Compute in TRUE IST (UTC+5:30, no DST) — not machine-local, since GitHub
+    # runners are UTC. This is what showed "04:35 IST" instead of "10:05 IST".
+    ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+    today = summary.get("today", ist_now.strftime("%Y-%m-%d"))
+    generated = ist_now.strftime("%Y-%m-%d %H:%M IST (%a)")
+    nice_name = ist_now.strftime("Ambassador_Error_Report_%Y-%m-%d_%a_%H-%M_IST.html")
     preview = build_preview(summary, today, generated)
     rc.upload(report_path, text=preview, filename=nice_name)
     return True
