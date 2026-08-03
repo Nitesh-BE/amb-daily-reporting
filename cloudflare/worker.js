@@ -12,10 +12,10 @@ const CMD_RE = /^\/(?:gr|generatereport)\b\s*(\d+(?:\.\d+)?)?\s*([hd]?)/;
 
 export default {
   async scheduled(event, env, ctx) {
-    if (event.cron === "45 3 * * 1-5") {
-      ctx.waitUntil(dispatch(env, 24, "scheduled 09:15 IST (Cloudflare)"));
+    if (event.cron === "* * * * *") {
+      ctx.waitUntil(pollForCommands(env));                        // every minute: /gr listener
     } else {
-      ctx.waitUntil(pollForCommands(env));
+      ctx.waitUntil(dispatch(env, 24, "scheduled daily (Cloudflare)"));  // the daily cron (any other schedule)
     }
   },
 
