@@ -1,0 +1,43 @@
+name: Ambassador Daily Report (Bot)
+
+# ISOLATED bot pipeline — posts AS the bot to the TEST team, using its own
+# BOT_RC_* secrets. Completely separate from daily-report.yml (which stays the
+# live report posting as the JWT user to the original team). No schedule here:
+# it runs only on manual dispatch or when the Cloudflare Worker triggers it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: "Report window in hours (default 24)"
+        required: false
+        default: "24"
+
+concurrency:
+  group: daily-report-bot
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate report and post AS BOT to the test team
+        env:
+          CORALOGIX_API_KEY:  ${{ secrets.CORALOGIX_API_KEY }}
+          CORALOGIX_BASE_URL: ${{ secrets.CORALOGIX_BASE_URL }}
+          RC_SERVER_URL:      ${{ secrets.RC_SERVER_URL }}
+          RC_CLIENT_ID:       ${{ secrets.BOT_RC_CLIENT_ID }}
+          RC_BOT_TOKEN:       ${{ secrets.BOT_RC_TOKEN }}
+          RC_GROUP_ID:        ${{ secrets.BOT_RC_GROUP_ID }}
+          LOOKBACK_HOURS:     ${{ github.event.inputs.lookback_hours }}
+        run: python runner.py "bot-test (GitHub Actions)"
