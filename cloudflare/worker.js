@@ -165,10 +165,18 @@ async function ensureSubscription(env) {
   if (meta && meta.nextCheck && meta.nextCheck > now) return;   // still good / backing off
 
   const server = rcServer(env);
-  if (meta && meta.id) {
-    try { await fetch(`${server}/restapi/v1.0/subscription/${meta.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${env.RC_BOT_TOKEN}` } }); } catch {}
-  }
   const address = env.WEBHOOK_URL || "https://amb-daily-reporting.maddala-nitesh.workers.dev/";
+  // Delete ANY existing subscriptions pointing at us, so we never accumulate duplicates.
+  try {
+    const list = await (await fetch(`${server}/restapi/v1.0/subscription`,
+      { headers: { Authorization: `Bearer ${env.RC_BOT_TOKEN}` } })).json();
+    for (const s of (list.records || [])) {
+      if ((s.deliveryMode || {}).address === address) {
+        await fetch(`${server}/restapi/v1.0/subscription/${s.id}`,
+          { method: "DELETE", headers: { Authorization: `Bearer ${env.RC_BOT_TOKEN}` } });
+      }
+    }
+  } catch {}
   const resp = await fetch(`${server}/restapi/v1.0/subscription`, {
     method: "POST",
     headers: { Authorization: `Bearer ${env.RC_BOT_TOKEN}`, "Content-Type": "application/json" },
