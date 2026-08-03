@@ -13,8 +13,7 @@ export default {
     if (event.cron === "* * * * *") {
       ctx.waitUntil(tick(env));
     } else {
-      const daily = env.DAILY_GROUP_ID || watchedTeams(env)[0];
-      ctx.waitUntil(dispatch(env, 24, "scheduled daily (Cloudflare)", daily));
+      ctx.waitUntil(runDaily(env));
     }
   },
 
@@ -32,7 +31,7 @@ export default {
     const url = new URL(request.url);
     if (url.searchParams.get("run")) {
       const h = parseFloat(url.searchParams.get("hours") || "24") || 24;
-      const team = url.searchParams.get("team") || env.DAILY_GROUP_ID || watchedTeams(env)[0];
+      const team = url.searchParams.get("team") || (await getMemberTeams(env))[0];
       const ok = await dispatch(env, h, "manual (URL)", team);
       return new Response(ok ? `dispatched (team ${team}, ${h}h)\n` : "GITHUB_TOKEN not set\n");
     }
@@ -44,14 +43,32 @@ export default {
     if (url.searchParams.get("status")) {
       const pending = JSON.parse((await env.LASTSEEN.get("scheduled")) || "[]");
       const sub = JSON.parse((await env.LASTSEEN.get("sub")) || "null");
-      return new Response(JSON.stringify({ alive: true, watched: watchedTeams(env), pending, sub }, null, 2) + "\n");
+      return new Response(JSON.stringify({ alive: true, teams: await getMemberTeams(env), pending, sub }, null, 2) + "\n");
     }
     return new Response("AMB bot worker is alive\n");
   },
 };
 
-function watchedTeams(env) {
-  return (env.WATCHED_TEAMS || env.RC_GROUP_ID || "").split(",").map(s => s.trim()).filter(Boolean);
+// Teams the bot serves = the teams it's actually a MEMBER of. We learn each one
+// the first time the webhook delivers a post from it (the bot only receives
+// events for teams it belongs to). WATCHED_TEAMS is an optional always-on seed.
+async function getMemberTeams(env) {
+  const set = new Set((env.WATCHED_TEAMS || env.RC_GROUP_ID || "").split(",").map(s => s.trim()).filter(Boolean));
+  try {
+    const m = JSON.parse((await env.LASTSEEN.get("memberTeams")) || "{}") || {};
+    const cutoff = Date.now() - 60 * 24 * 3600 * 1000;   // forget teams silent > 60 days
+    for (const [t, ts] of Object.entries(m)) if (ts > cutoff) set.add(t);
+  } catch {}
+  const excl = new Set((env.EXCLUDE_TEAMS || "1851899910").split(",").map(s => s.trim()).filter(Boolean));
+  return [...set].filter(t => t && !excl.has(t));
+}
+async function learnTeam(env, team) {
+  const excl = new Set((env.EXCLUDE_TEAMS || "1851899910").split(",").map(s => s.trim()));
+  if (!team || excl.has(team)) return;
+  let m = {};
+  try { m = JSON.parse((await env.LASTSEEN.get("memberTeams")) || "{}") || {}; } catch {}
+  m[team] = Date.now();
+  await env.LASTSEEN.put("memberTeams", JSON.stringify(m));
 }
 function rcServer(env) {
   return (env.RC_SERVER_URL || "https://platform.ringcentral.com").replace(/\/+$/, "");
@@ -81,17 +98,25 @@ function fmtDelay(min) {
 }
 
 // ── per-minute tick (safety net + scheduler + subscription upkeep) ───────────
+async function runDaily(env) {
+  for (const team of await getMemberTeams(env)) {
+    await dispatch(env, 24, "scheduled daily (Cloudflare)", team);
+  }
+}
+
 async function tick(env) {
   if (!env.RC_BOT_TOKEN) return;
   await ensureSubscription(env);
   await fireDueScheduled(env);
-  for (const team of watchedTeams(env)) await pollTeam(env, team);
+  for (const team of await getMemberTeams(env)) await pollTeam(env, team);
 }
 
 // ── instant path: a post was pushed to us ───────────────────────────────────
 async function handleWebhookEvent(env, post) {
   const team = String(post.groupId || "");
-  if (!team || !watchedTeams(env).includes(team)) return;
+  const excl = new Set((env.EXCLUDE_TEAMS || "1851899910").split(",").map(s => s.trim()));
+  if (!team || excl.has(team)) return;         // ignore the org-wide "Everyone" team
+  await learnTeam(env, team);                  // any team we get events from = a member the bot serves
   await processCommandPost(env, { id: post.id, text: post.text, creationTime: post.creationTime }, team);
 }
 

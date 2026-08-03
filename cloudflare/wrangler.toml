@@ -3,8 +3,8 @@ main = "worker.js"
 compatibility_date = "2026-08-01"
 
 [vars]
-WATCHED_TEAMS  = "164470267910"   # comma-separated team ids watched for /gr (report posts back to origin team)
-DAILY_GROUP_ID = "164470267910"   # team the 10:00 IST daily posts to
+WATCHED_TEAMS  = "164470267910"   # always-on seed team(s); every OTHER team the bot is added to is learned automatically
+EXCLUDE_TEAMS  = "1851899910"     # org-wide "Everyone" team — never post the report there
 WEBHOOK_URL    = "https://amb-daily-reporting.maddala-nitesh.workers.dev/"  # RingCentral pushes events here (instant)
 
 [triggers]
