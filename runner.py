@@ -50,8 +50,28 @@ def _short(label):
     return label.replace("_", " ", 1).replace("_", " ")
 
 
+def _already_delivered(rc, ist_date):
+    """True if a scheduled report for this IST date was already posted."""
+    try:
+        for p in rc.recent_posts(count=15):
+            t = p.get("text") or ""
+            if t.startswith("✅ **Ambassador Error Report") and ist_date in t:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def run_report(trigger="scheduled", lookback_hours=24):
     rc = RingCentral(CFG["ringcentral"])
+
+    # De-dup: several backup cron times fire each morning, but only the FIRST
+    # scheduled run of the day should post. Manual / /gr runs are never skipped.
+    ist_today = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
+    if "scheduled" in trigger.lower() and _already_delivered(rc, ist_today):
+        print(f"[skip] scheduled report for {ist_today} already delivered", flush=True)
+        return True
+
     key = coralogix_key()
     base = CFG.get("coralogix", {}).get("base_url", "https://api.cx498.coralogix.com")
 
