@@ -25,6 +25,18 @@ try:
 except Exception:
     WINDOW_LABEL = "Last 24 Hours"
 
+# Display everything in IST (UTC+5:30, no DST) — START/END arrive as UTC ISO.
+_IST = timezone(timedelta(hours=5, minutes=30))
+def _to_ist(iso_z):
+    try:
+        return (datetime.strptime(iso_z, "%Y-%m-%dT%H:%M:%SZ")
+                .replace(tzinfo=timezone.utc).astimezone(_IST)
+                .strftime("%Y-%m-%d %H:%M IST"))
+    except Exception:
+        return iso_z
+START_IST = _to_ist(START)
+END_IST = _to_ist(END)
+
 print(f"Period : {START}  →  {END}", flush=True)
 
 CONFIGURED_TIMEOUTS = {
@@ -643,7 +655,7 @@ tr:hover td {background:#f8f9fa}
 """
 
     # ── build sections ───────────────────────────────────────────────────────
-    generated_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    generated_ts = datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S IST")
 
     # Stat grid
     stat_grid_html = f"""
@@ -799,7 +811,7 @@ tr:hover td {background:#f8f9fa}
 <div class="container">
 
 <h1>Ambassador Error Analysis &mdash; Daily Report</h1>
-<div class="subtitle">Period: {START} &mdash; {END} ({WINDOW_LABEL}) &nbsp;|&nbsp; Service: ambassador-service-java-backend &nbsp;|&nbsp; Generated: {generated_ts}</div>
+<div class="subtitle">Period: {START_IST} &mdash; {END_IST} ({WINDOW_LABEL}) &nbsp;|&nbsp; Service: ambassador-service-java-backend &nbsp;|&nbsp; Generated: {generated_ts}</div>
 
 {stat_grid_html}
 
