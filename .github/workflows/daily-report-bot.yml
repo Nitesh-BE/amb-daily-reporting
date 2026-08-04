@@ -18,7 +18,9 @@ on:
         default: ""
 
 concurrency:
-  group: daily-report-bot
+  # Per-team group so multi-team daily runs NEVER cancel each other
+  # (one shared group was cancelling queued teams). Same team still serializes.
+  group: daily-report-bot-${{ github.event.inputs.group_id }}
   cancel-in-progress: false
 
 jobs:
