@@ -10,11 +10,13 @@
 
 export default {
   async scheduled(event, env, ctx) {
-    if (event.cron === "* * * * *") {
-      ctx.waitUntil(tick(env));
-    } else {
-      ctx.waitUntil(runDaily(env));
-    }
+    // Single cron now (`* * * * *`): the every-minute tick drives BOTH the /gr
+    // poll AND the daily send (see maybeRunDaily). Any cron invocation → tick,
+    // so even a stray/legacy daily cron just runs a guarded tick, never a double.
+    // This is deliberate: the per-minute cron is the one trigger that has proven
+    // reliable, so the 10:00 daily now rides on it instead of a separate cron
+    // (a separate `30 4 * * 1-5` cron was silently dropped by a redeploy once).
+    ctx.waitUntil(tick(env));
   },
 
   async fetch(request, env) {
@@ -97,18 +99,75 @@ function fmtDelay(min) {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
-// ── per-minute tick (safety net + scheduler + subscription upkeep) ───────────
-async function runDaily(env) {
-  for (const team of await getMemberTeams(env)) {
-    await dispatch(env, 24, "scheduled daily (Cloudflare)", team);
-  }
-}
-
+// ── per-minute tick (poll + scheduler + subscription upkeep + daily) ─────────
 async function tick(env) {
   if (!env.RC_BOT_TOKEN) return;
   await ensureSubscription(env);
   await fireDueScheduled(env);
   for (const team of await getMemberTeams(env)) await pollTeam(env, team);
+  await maybeRunDaily(env);
+}
+
+// ── the 10:00 IST daily, run FROM the reliable every-minute tick ─────────────
+// Three phases, each guarded by a KV flag so it runs exactly once per IST day:
+//   A (>=10:00) send today's report to every member team.
+//   B (>=10:20) read each team back; re-fire any that don't actually have it
+//               (covers a cancelled/failed GitHub run — no silent per-team miss).
+//   C (>=10:40) if a team is STILL missing, post a visible alert — a miss can
+//               never again be silent (you stop being the monitor).
+// Because it's driven by the per-minute cron, a skipped minute only delays a
+// phase by <=1 min instead of losing the whole day.
+async function maybeRunDaily(env) {
+  const ist = new Date(Date.now() + 5.5 * 3600 * 1000);   // shift so UTC getters read IST
+  const dow = ist.getUTCDay();                            // 0=Sun .. 6=Sat (IST)
+  if (dow === 0 || dow === 6) return;                     // weekdays only
+  const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  if (mins < 600) return;                                 // before 10:00 IST
+  const date = ist.toISOString().slice(0, 10);            // YYYY-MM-DD (IST)
+  const TTL = { expirationTtl: 2 * 24 * 3600 };
+
+  // Phase A — send once, at/after 10:00
+  if (!(await env.LASTSEEN.get(`dsent:${date}`))) {
+    for (const team of await getMemberTeams(env)) {
+      await dispatch(env, 24, "scheduled daily (Cloudflare)", team);
+    }
+    await env.LASTSEEN.put(`dsent:${date}`, String(Date.now()), TTL);
+    return;                                               // give reports time to generate
+  }
+
+  // Phase B — verify + retry once, at/after 10:20
+  if (mins >= 620 && !(await env.LASTSEEN.get(`dverify:${date}`))) {
+    for (const team of await getMemberTeams(env)) {
+      if (!(await teamHasReportToday(env, team, date))) {
+        await dispatch(env, 24, "scheduled daily retry (Cloudflare)", team);
+      }
+    }
+    await env.LASTSEEN.put(`dverify:${date}`, String(Date.now()), TTL);
+    return;
+  }
+
+  // Phase C — alert on anything still missing, once, at/after 10:40
+  if (mins >= 640 && !(await env.LASTSEEN.get(`dalert:${date}`))) {
+    for (const team of await getMemberTeams(env)) {
+      if (!(await teamHasReportToday(env, team, date))) {
+        await postToTeam(env, team,
+          "⚠️ Today's automated 10:00 IST report couldn't be generated after a retry. " +
+          "Flagging so it isn't a silent miss — send `/gr` to retry manually.");
+      }
+    }
+    await env.LASTSEEN.put(`dalert:${date}`, String(Date.now()), TTL);
+  }
+}
+
+// True if this team already has today's finished report (matches the posted header).
+async function teamHasReportToday(env, team, date) {
+  try {
+    const r = await fetch(`${rcServer(env)}/team-messaging/v1/chats/${team}/posts?recordCount=15`,
+      { headers: { Authorization: `Bearer ${env.RC_BOT_TOKEN}` } });
+    if (!r.ok) return false;
+    const posts = (await r.json()).records || [];
+    return posts.some(p => { const t = p.text || ""; return t.includes("Ambassador Error Report") && t.includes(date); });
+  } catch { return false; }
 }
 
 // ── instant path: a post was pushed to us ───────────────────────────────────

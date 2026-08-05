@@ -8,7 +8,11 @@ EXCLUDE_TEAMS  = "1851899910"     # org-wide "Everyone" team — never post the 
 WEBHOOK_URL    = "https://amb-daily-reporting.maddala-nitesh.workers.dev/"  # RingCentral pushes events here (instant)
 
 [triggers]
-crons = ["* * * * *", "30 4 * * 1-5"]   # every-minute /gr poll  +  10:00 IST daily (04:30 UTC, Mon-Fri)
+# ONE cron on purpose. The every-minute tick drives the /gr poll AND the 10:00
+# IST daily (worker.js → maybeRunDaily). A separate `30 4 * * 1-5` daily cron was
+# silently dropped by a redeploy once; folding the daily into this proven-reliable
+# cron removes that single point of failure and the wrangler/git deploy clobber.
+crons = ["* * * * *"]
 
 [[kv_namespaces]]
 binding = "LASTSEEN"
