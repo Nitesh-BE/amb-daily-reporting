@@ -287,7 +287,7 @@ QUERIES = [
     ("Q5_api_breakdown",
      "source logs | filter $l.subsystemname == 'ambassador-service-java-backend' "
      "| filter $d.system != null | filter $d.system_status_code >= 400 "
-     "| redact $d.system_api matching /[0-9]+/ to '*' "
+     "| redact $d.system_api matching /\\b[0-9]+\\b/ to '*' "
      "| create $d.system_api from splitParts($d.system_api, '?', 1) "
      "| groupby $d.system, $d.system_api, $d.system_status_code aggregate count() as cnt "
      "| orderby cnt desc | limit 100"),
@@ -320,7 +320,7 @@ QUERIES = [
      "| filter $d.message:string.startsWith('AmbassadorRequestInterceptor-afterCompletion') "
      "| filter $d.message:string.contains('status:500') "
      "| extract $d.message:string into $d.p using regexp(e=/URI:(?<uri>.*?) time:(?<time>\\d+)ms/) "
-     "| redact $d.p.uri matching /[0-9]+/ to '*' "
+     "| redact $d.p.uri matching /\\b[0-9]+\\b/ to '*' "
      "| create $d.p.uri from splitParts($d.p.uri, '?', 1) "
      "| countby $d.p.uri desc | limit 50"),
 
@@ -333,7 +333,7 @@ QUERIES = [
      "| extract $d.message:string into $d.p using regexp(e=/URI:(?<uri>.*?) time:(?<time>\\d+)ms "
      "status:(?<status>\\d+) source:(?<source>\\S+) userId:(?<userId>\\S+) bizId:(?<bizId>\\S+) "
      "bizName:(?<bizName>.*?) bizType:(?<bizType>\\S+) x-account-id:(?<accountId>\\S+)/) "
-     "| redact $d.p.uri matching /[0-9]+/ to '*' "
+     "| redact $d.p.uri matching /\\b[0-9]+\\b/ to '*' "
      "| create $d.p.uri from splitParts($d.p.uri, '?', 1) "
      "| groupby $d.p.accountId, $d.p.bizName, $d.p.uri aggregate count() as cnt "
      "| orderby cnt desc"),
@@ -343,7 +343,7 @@ QUERIES = [
      "source logs | filter $l.subsystemname == 'ambassador-service-java-backend' "
      "| filter $d.service_response_time > 24000 "
      "| filter $d.system_status_code < 400 | filter $d.system_status_code > 0 "
-     "| redact $d.system_api matching /[0-9]+/ to '*' "
+     "| redact $d.system_api matching /\\b[0-9]+\\b/ to '*' "
      "| create $d.system_api from splitParts($d.system_api, '?', 1) "
      "| groupby $d.system, $d.system_api aggregate count() as cnt, "
      "max($d.service_response_time) as max_rt"),
