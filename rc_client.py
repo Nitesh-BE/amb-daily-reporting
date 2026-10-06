@@ -106,11 +106,16 @@ class RingCentral:
 
 def load_config(base_dir=None):
     # In CI (GitHub Actions) secrets arrive as env vars — no config.json on disk.
-    if os.environ.get("RC_CLIENT_ID"):
+    if os.environ.get("RC_CLIENT_ID") or os.environ.get("SLACK_BOT_TOKEN"):
         return {
+            "messenger": os.environ.get("MESSENGER", "ringcentral"),
+            "slack": {
+                "bot_token": os.environ.get("SLACK_BOT_TOKEN", ""),
+                "channel_id": os.environ.get("SLACK_CHANNEL_ID", ""),
+            },
             "ringcentral": {
                 "server_url": os.environ.get("RC_SERVER_URL", "https://platform.ringcentral.com"),
-                "client_id": os.environ["RC_CLIENT_ID"],
+                "client_id": os.environ.get("RC_CLIENT_ID", ""),
                 "client_secret": os.environ.get("RC_CLIENT_SECRET", ""),
                 "jwt": os.environ.get("RC_JWT", ""),
                 "bot_token": os.environ.get("RC_BOT_TOKEN", ""),
@@ -124,3 +129,12 @@ def load_config(base_dir=None):
     base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(base_dir, "config.json")) as f:
         return json.load(f)
+
+
+def get_messenger(cfg):
+    """Slack or RingCentral client, chosen by MESSENGER env / cfg["messenger"]."""
+    which = (os.environ.get("MESSENGER") or cfg.get("messenger") or "ringcentral").lower()
+    if which == "slack":
+        from slack_client import Slack
+        return Slack(cfg["slack"])
+    return RingCentral(cfg["ringcentral"])

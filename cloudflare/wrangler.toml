@@ -5,6 +5,8 @@ compatibility_date = "2026-08-01"
 [vars]
 WATCHED_TEAMS  = "164470267910,164472373254"   # explicit teams the bot serves (both verified as members); more are learned automatically
 EXCLUDE_TEAMS  = "1851899910"     # org-wide "Everyone" team — never post the report there
+SLACK_DAILY    = "off"            # "on" → 10:00 IST daily also goes to every Slack channel the bot is in
+RC_DAILY       = "on"             # "off" → stop the RingCentral daily once Slack is confirmed
 WEBHOOK_URL    = "https://amb-daily-reporting.maddala-nitesh.workers.dev/"  # RingCentral pushes events here (instant)
 
 [triggers]

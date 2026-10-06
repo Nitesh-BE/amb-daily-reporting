@@ -18,7 +18,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-from rc_client import RingCentral, load_config
+from rc_client import get_messenger, load_config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CFG = load_config(BASE_DIR)
@@ -73,7 +73,7 @@ def _scheduled_done_today(rc, ist_date):
 
 
 def run_report(trigger="scheduled", lookback_hours=24):
-    rc = RingCentral(CFG["ringcentral"])
+    rc = get_messenger(CFG)
 
     # De-dup: several backup cron times fire each morning; only the FIRST
     # scheduled run of the day posts. Manual / /gr runs are never skipped.

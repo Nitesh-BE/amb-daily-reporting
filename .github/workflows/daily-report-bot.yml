@@ -13,9 +13,13 @@ on:
         required: false
         default: "24"
       group_id:
-        description: "Target RingCentral team id (blank = default BOT_RC_GROUP_ID)"
+        description: "Target RingCentral team id or Slack channel id (blank = default BOT_RC_GROUP_ID)"
         required: false
         default: ""
+      messenger:
+        description: "ringcentral or slack"
+        required: false
+        default: "ringcentral"
 
 concurrency:
   # Per-team group so multi-team daily runs NEVER cancel each other
@@ -37,7 +41,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Generate report and post AS BOT to the test team
+      - name: Generate report and post AS BOT (RingCentral or Slack)
         env:
           CORALOGIX_API_KEY:  ${{ secrets.CORALOGIX_API_KEY }}
           CORALOGIX_BASE_URL: ${{ secrets.CORALOGIX_BASE_URL }}
@@ -45,5 +49,8 @@ jobs:
           RC_CLIENT_ID:       ${{ secrets.BOT_RC_CLIENT_ID }}
           RC_BOT_TOKEN:       ${{ secrets.BOT_RC_TOKEN }}
           RC_GROUP_ID:        ${{ github.event.inputs.group_id != '' && github.event.inputs.group_id || secrets.BOT_RC_GROUP_ID }}
+          MESSENGER:          ${{ github.event.inputs.messenger || 'ringcentral' }}
+          SLACK_BOT_TOKEN:    ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID:   ${{ github.event.inputs.group_id }}
           LOOKBACK_HOURS:     ${{ github.event.inputs.lookback_hours }}
         run: python runner.py "bot-test (GitHub Actions)"

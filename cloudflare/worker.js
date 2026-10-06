@@ -7,6 +7,10 @@
 //
 // Multi-team: watches every team in WATCHED_TEAMS; each report posts back to the
 // team the command came from. Daily (10:00 IST) posts to DAILY_GROUP_ID.
+//
+// Slack: /gr is a Slack slash command POSTed to /slack/command (signed with
+// SLACK_SIGNING_SECRET). Slack channel ids (C…/G…) route to Slack, numeric
+// ids to RingCentral, so both platforms run side by side during the cutover.
 
 export default {
   async scheduled(event, env, ctx) {
@@ -19,7 +23,11 @@ export default {
     ctx.waitUntil(tick(env));
   },
 
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
+    // 0) Slack slash command (/gr) — Slack POSTs a signed form here
+    if (request.method === "POST" && new URL(request.url).pathname === "/slack/command") {
+      return handleSlackCommand(request, env, ctx);
+    }
     // 1) RingCentral webhook validation handshake
     const vt = request.headers.get("Validation-Token");
     if (vt) return new Response("", { status: 200, headers: { "Validation-Token": vt } });
@@ -101,11 +109,21 @@ function fmtDelay(min) {
 
 // ── per-minute tick (poll + scheduler + subscription upkeep + daily) ─────────
 async function tick(env) {
-  if (!env.RC_BOT_TOKEN) return;
-  await ensureSubscription(env);
+  if (env.RC_BOT_TOKEN) {
+    await ensureSubscription(env);
+    for (const team of await getMemberTeams(env)) await pollTeam(env, team);
+  }
   await fireDueScheduled(env);
-  for (const team of await getMemberTeams(env)) await pollTeam(env, team);
   await maybeRunDaily(env);
+}
+
+// Teams/channels that get the 10:00 IST daily. RingCentral stays on until
+// RC_DAILY="off"; Slack joins once SLACK_DAILY="on" (every channel the bot is in).
+async function dailyTargets(env) {
+  const out = [];
+  if (env.RC_BOT_TOKEN && env.RC_DAILY !== "off") out.push(...(await getMemberTeams(env)));
+  if (env.SLACK_BOT_TOKEN && env.SLACK_DAILY === "on") out.push(...(await slackMemberChannels(env)));
+  return out;
 }
 
 // ── the 10:00 IST daily, run FROM the reliable every-minute tick ─────────────
@@ -128,7 +146,7 @@ async function maybeRunDaily(env) {
 
   // Phase A — send once, at/after 10:00
   if (!(await env.LASTSEEN.get(`dsent:${date}`))) {
-    for (const team of await getMemberTeams(env)) {
+    for (const team of await dailyTargets(env)) {
       await dispatch(env, 24, "scheduled daily (Cloudflare)", team);
     }
     await env.LASTSEEN.put(`dsent:${date}`, String(Date.now()), TTL);
@@ -137,7 +155,7 @@ async function maybeRunDaily(env) {
 
   // Phase B — verify + retry once, at/after 10:20
   if (mins >= 620 && !(await env.LASTSEEN.get(`dverify:${date}`))) {
-    for (const team of await getMemberTeams(env)) {
+    for (const team of await dailyTargets(env)) {
       if (!(await teamHasReportToday(env, team, date))) {
         await dispatch(env, 24, "scheduled daily retry (Cloudflare)", team);
       }
@@ -148,7 +166,7 @@ async function maybeRunDaily(env) {
 
   // Phase C — alert on anything still missing, once, at/after 10:40
   if (mins >= 640 && !(await env.LASTSEEN.get(`dalert:${date}`))) {
-    for (const team of await getMemberTeams(env)) {
+    for (const team of await dailyTargets(env)) {
       if (!(await teamHasReportToday(env, team, date))) {
         await postToTeam(env, team,
           "⚠️ Today's automated 10:00 IST report couldn't be generated after a retry. " +
@@ -161,6 +179,12 @@ async function maybeRunDaily(env) {
 
 // True if this team already has today's finished report (matches the posted header).
 async function teamHasReportToday(env, team, date) {
+  if (isSlack(team)) {
+    try {
+      const j = await slackApi(env, "conversations.history", { channel: team, limit: 15 }, "GET");
+      return (j.messages || []).some(m => { const t = m.text || ""; return t.includes("Ambassador Error Report") && t.includes(date); });
+    } catch { return false; }
+  }
   try {
     const r = await fetch(`${rcServer(env)}/team-messaging/v1/chats/${team}/posts?recordCount=15`,
       { headers: { Authorization: `Bearer ${env.RC_BOT_TOKEN}` } });
@@ -281,6 +305,10 @@ async function ensureSubscription(env) {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 async function postToTeam(env, team, text) {
+  if (isSlack(team)) {
+    try { await slackApi(env, "chat.postMessage", { channel: team, text }); } catch {}
+    return;
+  }
   try {
     await fetch(`${rcServer(env)}/team-messaging/v1/chats/${team}/posts`, {
       method: "POST",
@@ -303,7 +331,77 @@ async function dispatch(env, hours, reason, groupId) {
       "User-Agent": "amb-bot-worker",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ ref: "main", inputs: { lookback_hours: String(Math.round(hours)), group_id: groupId || "" } }),
+    body: JSON.stringify({ ref: "main", inputs: {
+      lookback_hours: String(Math.round(hours)),
+      group_id: groupId || "",
+      messenger: isSlack(groupId) ? "slack" : "ringcentral",
+    } }),
   });
   return resp.ok;
+}
+
+// ── Slack ────────────────────────────────────────────────────────────────────
+// Slack channel ids look like C0123ABCD / G0123ABCD; RingCentral team ids are numeric.
+function isSlack(id) {
+  return /^[CG][A-Z0-9]{6,}$/.test(String(id || ""));
+}
+
+async function slackApi(env, method, params, http = "POST") {
+  const init = { method: http, headers: { Authorization: `Bearer ${env.SLACK_BOT_TOKEN}` } };
+  let url = `https://slack.com/api/${method}`;
+  if (http === "GET") url += "?" + new URLSearchParams(params);
+  else { init.headers["Content-Type"] = "application/json; charset=utf-8"; init.body = JSON.stringify(params); }
+  const j = await (await fetch(url, init)).json();
+  if (!j.ok) throw new Error(`slack ${method}: ${j.error}`);
+  return j;
+}
+
+// Every channel the bot has been /invite'd to.
+async function slackMemberChannels(env) {
+  try {
+    const j = await slackApi(env, "users.conversations",
+      { types: "public_channel,private_channel", exclude_archived: "true", limit: "200" }, "GET");
+    return (j.channels || []).map(c => c.id);
+  } catch { return []; }
+}
+
+// Constant-time-ish check of X-Slack-Signature (v0=HMAC_SHA256(secret, "v0:ts:body")).
+async function verifySlack(env, request, body) {
+  const ts = request.headers.get("X-Slack-Request-Timestamp") || "";
+  const sig = request.headers.get("X-Slack-Signature") || "";
+  if (!env.SLACK_SIGNING_SECRET || !ts || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.SLACK_SIGNING_SECRET),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`v0:${ts}:${body}`));
+  const expected = "v0=" + [...new Uint8Array(mac)].map(b => b.toString(16).padStart(2, "0")).join("");
+  if (expected.length !== sig.length) return false;
+  let diff = 0;
+  for (let i = 0; i < sig.length; i++) diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
+  return diff === 0;
+}
+
+// /gr [6h | 2d | in 10m] — must answer within 3s, so the GitHub dispatch runs after we reply.
+async function handleSlackCommand(request, env, ctx) {
+  const body = await request.text();
+  if (!(await verifySlack(env, request, body))) return new Response("bad signature", { status: 401 });
+  const form = new URLSearchParams(body);
+  const channel = form.get("channel_id") || "";
+  const cmd = parseCommand(`/gr ${form.get("text") || ""}`);
+  const reply = (text, inChannel = true) => new Response(
+    JSON.stringify({ response_type: inChannel ? "in_channel" : "ephemeral", text }),
+    { headers: { "Content-Type": "application/json" } });
+
+  if (!channel.startsWith("C") && !channel.startsWith("G")) {
+    return reply("Please run `/gr` in a channel (not a DM), after `/invite @AMB Daily Reporting`.", false);
+  }
+  if (!(await slackMemberChannels(env)).includes(channel)) {
+    return reply("I'm not in this channel yet — run `/invite @AMB Daily Reporting` first, then `/gr` again.", false);
+  }
+  if (cmd.delayMin > 0) {
+    await scheduleReport(env, cmd, Date.now(), channel);
+    return reply(`⏳ Scheduled — report in ~${fmtDelay(cmd.delayMin)} (window: last ${cmd.lookbackH}h).`);
+  }
+  ctx.waitUntil(dispatch(env, cmd.lookbackH, "/gr (Slack)", channel));
+  const win = cmd.lookbackH === 24 ? "" : ` (last ${cmd.lookbackH}h)`;
+  return reply(`👀 Got it — generating your report${win} now, it'll be here in a few minutes…`);
 }
