@@ -41,7 +41,7 @@ export default {
     const url = new URL(request.url);
     if (url.searchParams.get("run")) {
       const h = parseFloat(url.searchParams.get("hours") || "24") || 24;
-      const team = url.searchParams.get("team") || (await getMemberTeams(env))[0];
+      const team = url.searchParams.get("team") || (await dailyTargets(env))[0];
       const ok = await dispatch(env, h, "manual (URL)", team);
       return new Response(ok ? `dispatched (team ${team}, ${h}h)\n` : "GITHUB_TOKEN not set\n");
     }
@@ -53,7 +53,7 @@ export default {
     if (url.searchParams.get("status")) {
       const pending = JSON.parse((await env.LASTSEEN.get("scheduled")) || "[]");
       const sub = JSON.parse((await env.LASTSEEN.get("sub")) || "null");
-      return new Response(JSON.stringify({ alive: true, teams: await getMemberTeams(env), pending, sub }, null, 2) + "\n");
+      return new Response(JSON.stringify({ alive: true, dailyTargets: await dailyTargets(env), pending, sub }, null, 2) + "\n");
     }
     return new Response("AMB bot worker is alive\n");
   },
@@ -109,7 +109,7 @@ function fmtDelay(min) {
 
 // ── per-minute tick (poll + scheduler + subscription upkeep + daily) ─────────
 async function tick(env) {
-  if (env.RC_BOT_TOKEN) {
+  if (rcEnabled(env)) {
     await ensureSubscription(env);
     for (const team of await getMemberTeams(env)) await pollTeam(env, team);
   }
@@ -117,11 +117,15 @@ async function tick(env) {
   await maybeRunDaily(env);
 }
 
-// Teams/channels that get the 10:00 IST daily. RingCentral stays on until
-// RC_DAILY="off"; Slack joins once SLACK_DAILY="on" (every channel the bot is in).
+function rcEnabled(env) {
+  return !!env.RC_BOT_TOKEN && env.RC_ENABLED !== "off";
+}
+
+// Teams/channels that get the 10:00 IST daily: RingCentral teams unless
+// RC_ENABLED="off", plus every Slack channel the bot is in when SLACK_DAILY="on".
 async function dailyTargets(env) {
   const out = [];
-  if (env.RC_BOT_TOKEN && env.RC_DAILY !== "off") out.push(...(await getMemberTeams(env)));
+  if (rcEnabled(env)) out.push(...(await getMemberTeams(env)));
   if (env.SLACK_BOT_TOKEN && env.SLACK_DAILY === "on") out.push(...(await slackMemberChannels(env)));
   return out;
 }
