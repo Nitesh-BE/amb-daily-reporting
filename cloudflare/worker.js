@@ -144,7 +144,9 @@ async function maybeRunDaily(env) {
   const dow = ist.getUTCDay();                            // 0=Sun .. 6=Sat (IST)
   if (dow === 0 || dow === 6) return;                     // weekdays only
   const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-  if (mins < 600) return;                                 // before 10:00 IST
+  const [dh, dm] = (env.DAILY_AT || "10:00").split(":").map(Number);
+  const at = dh * 60 + (dm || 0);                         // send time, minutes after IST midnight
+  if (mins < at) return;                                  // before send time
   const date = ist.toISOString().slice(0, 10);            // YYYY-MM-DD (IST)
   const TTL = { expirationTtl: 2 * 24 * 3600 };
 
@@ -158,7 +160,7 @@ async function maybeRunDaily(env) {
   }
 
   // Phase B — verify + retry once, at/after 10:20
-  if (mins >= 620 && !(await env.LASTSEEN.get(`dverify:${date}`))) {
+  if (mins >= at + 20 && !(await env.LASTSEEN.get(`dverify:${date}`))) {
     for (const team of await dailyTargets(env)) {
       if (!(await teamHasReportToday(env, team, date))) {
         await dispatch(env, 24, "scheduled daily retry (Cloudflare)", team);
@@ -169,7 +171,7 @@ async function maybeRunDaily(env) {
   }
 
   // Phase C — alert on anything still missing, once, at/after 10:40
-  if (mins >= 640 && !(await env.LASTSEEN.get(`dalert:${date}`))) {
+  if (mins >= at + 40 && !(await env.LASTSEEN.get(`dalert:${date}`))) {
     for (const team of await dailyTargets(env)) {
       if (!(await teamHasReportToday(env, team, date))) {
         await postToTeam(env, team,

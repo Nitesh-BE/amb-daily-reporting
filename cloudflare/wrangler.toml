@@ -5,7 +5,8 @@ compatibility_date = "2026-08-01"
 [vars]
 WATCHED_TEAMS  = "164470267910,164472373254"   # explicit teams the bot serves (both verified as members); more are learned automatically
 EXCLUDE_TEAMS  = "1851899910"     # org-wide "Everyone" team — never post the report there
-SLACK_DAILY    = "on"             # 10:00 IST weekday daily → every Slack channel the bot is in
+DAILY_AT       = "10:00"          # IST send time (HH:MM, weekdays); verify +20m, alert +40m
+SLACK_DAILY    = "on"             # weekday daily → every Slack channel the bot is in
 RC_ENABLED     = "off"            # RingCentral retired (Oct 2026): no RC polling, webhook or daily
 WEBHOOK_URL    = "https://amb-daily-reporting.maddala-nitesh.workers.dev/"  # RingCentral pushes events here (instant)
 
